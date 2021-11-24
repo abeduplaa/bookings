@@ -18,10 +18,28 @@ headers = {
     
 }
 
-DATE_COLUMN = 'start_time'
+DATE_COLUMN = 'start_date'
 
 
-def fetch_data(params, headers, snapshot_time):
+# @st.cache
+def load_data(start_date, end_date, selected_service_area, selected_vehicle_type):
+    params = {
+            'all_trips_during_window':"true",
+            'deposit_collected':'false',
+            'start_date':start_date,
+            'end_date':end_date,
+            'service_area_name':selected_service_area,
+            'no_surfer_activity':'false',
+            'surfer_unassigned':'false',
+            'trip_status':'all',
+            'user_unverified':'false',
+            'user_verified':'false',
+            'vehicle_unassigned':'false',
+            'vehicle_classes':selected_vehicle_type,
+            'limit':10000,
+            'leg_type':'delivery',
+        }
+    
     response = requests.get("https://api.drivekyte.com/api/fleet/bookings/legs?",params=params, headers=headers)
     print(response.status_code)
     response.raise_for_status()
@@ -31,43 +49,20 @@ def fetch_data(params, headers, snapshot_time):
     df = pd.DataFrame(response_data)
 
     # convert to datetime
-    df[DATE_COLUMN] = pd.to_datetime(df[DATE_COLUMN],unit='ms')
-
-    # keep only service area name
     df['service_area'] = df['service_area'].apply(lambda x: x['name'])
+    df['start_date'] = df['trip'].apply(lambda x: x['start_date'])
+    df['end_date'] = df['trip'].apply(lambda x: x['end_date'])
     
-    #add in time period
-    df['point_in_time'] = snapshot_time
+    df['start_date'] = pd.to_datetime(df['start_date'],unit='ms')
+    df['end_date'] = pd.to_datetime(df['end_date'],unit='ms')
+    
+    df = df.drop(['lot','handover_address','no_surfer_activity','supplier_handoff_time','surfer','start_time','trip'],axis=1)
+    df = df.drop(df[(df['type'] == 'swap')].index)
+    df = df.drop(df[(df['type'] == 'swap')].index)
+
     return df
 
-
-@st.cache
-def load_data(NO_HOURS, GRANULARITY, start_date, selected_service_area, selected_vehicle_type):
-    for delta_hours in range(0,NO_HOURS,GRANULARITY):
-        snapshot_time = start_date + datetime.timedelta(hours=delta_hours)
-        unix_snapshot_time = int(snapshot_time.timestamp()*1000)
-        
-        params = {
-            'all_trips_during_window':"true",
-            'deposit_collected':'false',
-            'start_date':unix_snapshot_time,
-            'end_date':unix_snapshot_time+60000,
-            'leg_type':'delivery',
-            'service_area_name':selected_service_area,
-            'no_surfer_activity':'false',
-            'surfer_unassigned':'false',
-            'trip_status':'all',
-            'user_unverified':'false',
-            'user_verified':'false',
-            'vehicle_unassigned':'false',
-            'vehicle_classes':selected_vehicle_type,
-            'limit':2000,
-        }
-        # fetch batch of data
-        dfs.append(fetch_data(params, headers, snapshot_time))
-
-    return pd.concat(dfs)
-
+    
 
 
 
@@ -85,18 +80,22 @@ start_date_day = form.date_input("Start day", datetime.datetime.now())
 start_date_time = datetime.datetime.min.time()
 start_date = datetime.datetime.combine(start_date_day, start_date_time)
 
-#number of days in the future
-NO_DAYS = form.slider('Days Ahead', 1, 5, 5)  # min: 1, max: 5, default: 5
-NO_HOURS = NO_DAYS*24 + 1
+end_date_day = form.date_input("End day", datetime.datetime.now())
+end_date_time = datetime.datetime.min.time()
+end_date = datetime.datetime.combine(end_date_day, end_date_time)
 
-selected_granularity = form.selectbox("select time window in hours", [6,9,12,24],)
+# #number of days in the future
+# NO_DAYS = form.slider('Days Ahead', 1, 5, 5)  # min: 1, max: 5, default: 5
+# NO_HOURS = NO_DAYS*24 + 1
+
+# selected_granularity = form.selectbox("select time window in hours", [6,9,12,24],)
 
 
 #sumbmit button
 submitted = form.form_submit_button("Submit")
 
 
-GRANULARITY = selected_granularity #hours of granularity
+# GRANULARITY = selected_granularity #hours of granularity
 
 
 # start_date = datetime.datetime.now()
@@ -107,21 +106,29 @@ dfs = []
 if submitted:
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
-    data = load_data(NO_HOURS, GRANULARITY, start_date, selected_service_area, selected_vehicle_type)
+    data = load_data(start_date, end_date, selected_service_area, selected_vehicle_type)
 
 
     # Notify the reader that the data was successfully loaded.
     data_load_state.text('Loading data...done!')
 
+    df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='H'), columns=['date'])
+    df_plot['count']=0
+    
+    
+    for b in df_plot.index:
+        df_plot['count'].loc[b] = data[(data['start_date'] < df_plot['date'].loc[b]) & (data['end_date'] >= df_plot['date'].loc[b])].shape[0]
+    
+    df_plot['count'] = df_plot['count'].astype('int')
+    print(df_plot.head())
 
-    data_chart = data.groupby(data["point_in_time"]).count()['service_area']
+    df_plot = df_plot.set_index('date')
+
+    # data_chart = data.groupby(data["point_in_time"]).count()['service_area']
     # data_bar_chart = data_by_hour['service_area']
 
     # histogram
-    text_subheader = 'Number of ongoing bookings every' + str(GRANULARITY) + ' hours'
+    text_subheader = 'Number of ongoing bookings, per hour'
     st.subheader(text_subheader)
-    hist_values = np.histogram(
-        data[DATE_COLUMN].dt.hour, bins=24, range=(0,24))[0]
-
-    st.line_chart(data_chart)
+    st.line_chart(df_plot)
 
