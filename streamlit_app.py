@@ -20,7 +20,6 @@ headers = {
 
 DATE_COLUMN = 'start_date'
 
-
 # @st.cache
 def load_data(start_date, end_date, selected_service_area, selected_vehicle_type):
     params = {
@@ -56,6 +55,7 @@ def load_data(start_date, end_date, selected_service_area, selected_vehicle_type
     df['start_date'] = pd.to_datetime(df['start_date'],unit='ms')
     df['end_date'] = pd.to_datetime(df['end_date'],unit='ms')
     
+    # remove unnecessary data
     df = df.drop(['lot','handover_address','no_surfer_activity','supplier_handoff_time','surfer','start_time','trip'],axis=1)
     df = df.drop(df[(df['type'] == 'swap')].index)
     df = df.drop(df[(df['type'] == 'swap')].index)
@@ -64,71 +64,70 @@ def load_data(start_date, end_date, selected_service_area, selected_vehicle_type
 
     
 
+######### STREAMLIT INPUT WIDGETS #########
 
-
-#service area selector
+### Service area selector
 form = st.form("my_form")
 # list_service_area = list(data['service_area'].unique())
 list_service_area = ['LA', 'SF', 'BOS', 'BK', 'DC', 'NYC', 'SEA', 'MIA', 'CHI', 'LB', 'PHL']
 selected_service_area = form.selectbox("Select your service area", list_service_area)
 print(selected_service_area)
 
+### Vehicle type selector
 list_vehicle_type = ["Economy", "SUV", "Sedan"]
 selected_vehicle_type = form.selectbox("Select vehicle type", list_vehicle_type)
 
+### input number of vehicles 
+initial_no_vehicles = form.number_input("Insert start number of vehicles from today's fleet audit. \n Keep at 0 if you don't want to calculate this",value=0)
+
+### Start day selector
 start_date_day = form.date_input("Start day", datetime.datetime.now())
 start_date_time = datetime.datetime.min.time()
 start_date = datetime.datetime.combine(start_date_day, start_date_time)
 
-end_date_day = form.date_input("End day", datetime.datetime.now())
+### End day selector
+end_date_day = form.date_input("End day", datetime.datetime.now() + datetime.timedelta(days=1) )
 end_date_time = datetime.datetime.min.time()
 end_date = datetime.datetime.combine(end_date_day, end_date_time)
-
-# #number of days in the future
-# NO_DAYS = form.slider('Days Ahead', 1, 5, 5)  # min: 1, max: 5, default: 5
-# NO_HOURS = NO_DAYS*24 + 1
-
-# selected_granularity = form.selectbox("select time window in hours", [6,9,12,24],)
-
 
 #sumbmit button
 submitted = form.form_submit_button("Submit")
 
 
-# GRANULARITY = selected_granularity #hours of granularity
-
-
-# start_date = datetime.datetime.now()
-# end_date = start_date + datetime.timedelta(days=NO_DAYS)
-
-dfs = []
-
+## once user clicks submit
 if submitted:
+    
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
     data = load_data(start_date, end_date, selected_service_area, selected_vehicle_type)
 
-
     # Notify the reader that the data was successfully loaded.
     data_load_state.text('Loading data...done!')
-
+    
+    # create dataframe to plot 
     df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='H'), columns=['date'])
-    df_plot['count']=0
+    df_plot['no_bookings']=0
     
+    for row in df_plot.index:
+        df_plot.at[row, 'no_bookings'] = ( (data['start_date'] < df_plot.at[row, 'date']) & (data['end_date'] >= df_plot.at[row, 'date']) ).sum()
     
-    for b in df_plot.index:
-        df_plot['count'].loc[b] = data[(data['start_date'] < df_plot['date'].loc[b]) & (data['end_date'] >= df_plot['date'].loc[b])].shape[0]
-    
-    df_plot['count'] = df_plot['count'].astype('int')
-    print(df_plot.head())
-
+    df_plot['no_bookings'] = df_plot['no_bookings'].astype('int')
     df_plot = df_plot.set_index('date')
 
-    # data_chart = data.groupby(data["point_in_time"]).count()['service_area']
-    # data_bar_chart = data_by_hour['service_area']
+    df_plot['delta'] = df_plot['no_bookings'].apply(lambda x: df_plot['no_bookings'][start_date] - x)
+    
+    if initial_no_vehicles != 0:
+        car_col_name = "No of " + selected_vehicle_type
+        df_plot[car_col_name] = df_plot['delta'].apply(lambda x: initial_no_vehicles + x)
+        cols = ['no_bookings', car_col_name]
+        text_subheader = "Number of ongoing bookings and available " + selected_vehicle_type + ", per hour"
+    else:
+        cols = ['no_bookings']
+        text_subheader = "Number of ongoing " + selected_vehicle_type + " bookings, per hour"
 
-    # histogram
-    text_subheader = 'Number of ongoing bookings, per hour'
+
+    # create histogram
+    
     st.subheader(text_subheader)
-    st.line_chart(df_plot)
+    st.line_chart(df_plot[cols])
 
