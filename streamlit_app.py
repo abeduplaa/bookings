@@ -186,9 +186,11 @@ if submitted:
     # create 1-ways if checked
     if one_ways:
         # cars_leaving, cars_incoming = get_one_ways(data, selected_service_area)
-        st.subheader('Vehicles Leaving from Service area')
+        leaving_from_text = "Vehicles leaving from " + selected_service_area
+        st.subheader(leaving_from_text)
         st.write(cars_leaving)
 
-        st.subheader('Vehicles coming to Service area')
+        coming_to_text = "Vehicles coming to " + selected_service_area
+        st.subheader(coming_to_text)
         st.write(cars_incoming)
 
