@@ -6,7 +6,6 @@ import streamlit as st
 from streamlit import caching
 
 import datetime
-import math
 
 
 headers = {
@@ -18,27 +17,65 @@ headers = {
     
 }
 
-DATE_COLUMN = 'start_date'
-
-# @st.cache
-def load_data(start_date, end_date, selected_service_area, selected_vehicle_type):
-    params = {
+params = {
             'all_trips_during_window':"true",
             'deposit_collected':'false',
-            'start_date':start_date,
-            'end_date':end_date,
-            'service_area_name':selected_service_area,
             'no_surfer_activity':'false',
             'surfer_unassigned':'false',
             'trip_status':'all',
             'user_unverified':'false',
             'user_verified':'false',
             'vehicle_unassigned':'false',
-            'vehicle_classes':selected_vehicle_type,
             'limit':10000,
-            'leg_type':'delivery',
         }
+
+DATE_COLUMN = 'start_date'
+
+def post_filter_one_ways(data, selected_service_area):
+    return data.loc[data["type"]=="delivery"].loc[data["service_area"]==selected_service_area]
+
+def get_one_ways(data, selected_service_area):
     
+    deliveries = data.loc[data['type']=='delivery'].set_index('trip_uuid')
+    returns = data.loc[data['type']=='return'].set_index('trip_uuid')
+    result = pd.concat([deliveries, returns], axis=1, join="inner")
+
+    cols=pd.Series(result.columns)
+
+
+
+    for dup in cols[cols.duplicated()].unique(): 
+        cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
+    result.columns = cols
+
+
+    result = result.loc[~(result['service_area'] == result['service_area_1'])]
+    
+    result = result.rename(columns={'service_area':'Delivery_SA', 'service_area_1':'Return_SA'})
+    
+
+    result = result[['Delivery_SA','Return_SA','start_date','end_date']]
+    deliveries = result[result['Delivery_SA']==selected_service_area]
+    returns = result[result['Return_SA']==selected_service_area]
+
+    return deliveries, returns
+
+
+# @st.cache
+def load_data(start_date, end_date, selected_service_area, selected_vehicle_type, one_ways=False):
+    
+    params['start_date']=start_date
+    params['end_date']=end_date
+    params['vehicle_classes']=selected_vehicle_type
+
+    if one_ways:
+        params['service_area_name']="all"
+    else:
+        params['service_area_name']=selected_service_area
+        params['leg_type']='delivery'
+        
+
+
     response = requests.get("https://api.drivekyte.com/api/fleet/bookings/legs?",params=params, headers=headers)
     print(response.status_code)
     response.raise_for_status()
@@ -60,7 +97,7 @@ def load_data(start_date, end_date, selected_service_area, selected_vehicle_type
     df = df.drop(df[(df['type'] == 'swap')].index)
     df = df.drop(df[(df['type'] == 'swap')].index)
 
-    return df
+    return df, response_meta
 
     
 
@@ -71,24 +108,32 @@ form = st.form("my_form")
 # list_service_area = list(data['service_area'].unique())
 list_service_area = ['LA', 'SF', 'BOS', 'BK', 'DC', 'NYC', 'SEA', 'MIA', 'CHI', 'LB', 'PHL']
 selected_service_area = form.selectbox("Select your service area", list_service_area)
-print(selected_service_area)
 
 ### Vehicle type selector
 list_vehicle_type = ["Economy", "SUV", "Sedan"]
 selected_vehicle_type = form.selectbox("Select vehicle type", list_vehicle_type)
 
-### input number of vehicles 
-initial_no_vehicles = form.number_input("Insert start number of vehicles from today's fleet audit. \n Keep at 0 if you don't want to calculate this",value=0)
-
 ### Start day selector
 start_date_day = form.date_input("Start day", datetime.datetime.now())
 start_date_time = datetime.datetime.min.time()
 start_date = datetime.datetime.combine(start_date_day, start_date_time)
+start_date_unix = int(start_date.timestamp()*1000)
 
 ### End day selector
 end_date_day = form.date_input("End day", datetime.datetime.now() + datetime.timedelta(days=1) )
 end_date_time = datetime.datetime.min.time()
 end_date = datetime.datetime.combine(end_date_day, end_date_time)
+end_date_unix = int(end_date.timestamp()*1000)
+
+### simple
+# vehicle_availability = form.checkbox('Calculate vehicle availability (simple method)')
+
+### input number of vehicles 
+# if vehicle_availability:
+initial_no_vehicles = form.number_input("Insert start number of vehicles from today's fleet audit. \n Keep at 0 if you don't want to calculate this",value=0)
+
+### checkbox to show one ways
+one_ways = form.checkbox('Show one ways table (could take up to 10sec)')
 
 #sumbmit button
 submitted = form.form_submit_button("Submit")
@@ -99,11 +144,19 @@ if submitted:
     
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
-    data = load_data(start_date, end_date, selected_service_area, selected_vehicle_type)
+    data, meta = load_data(start_date=start_date_unix, end_date=end_date_unix, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type, one_ways=one_ways)
+
+    # output meta 
+    print(meta)
 
     # Notify the reader that the data was successfully loaded.
     data_load_state.text('Loading data...done!')
     
+
+    if one_ways:
+        cars_leaving, cars_incoming = get_one_ways(data=data, selected_service_area=selected_service_area)
+        data = post_filter_one_ways(data, selected_service_area)
+
     # create dataframe to plot 
     df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='H'), columns=['date'])
     df_plot['no_bookings']=0
@@ -127,7 +180,15 @@ if submitted:
 
 
     # create histogram
-    
     st.subheader(text_subheader)
     st.line_chart(df_plot[cols])
+
+    # create 1-ways if checked
+    if one_ways:
+        # cars_leaving, cars_incoming = get_one_ways(data, selected_service_area)
+        st.subheader('Vehicles Leaving from Service area')
+        st.write(cars_leaving)
+
+        st.subheader('Vehicles coming to Service area')
+        st.write(cars_incoming)
 
