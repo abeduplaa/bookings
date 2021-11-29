@@ -133,7 +133,7 @@ end_date_unix = int(end_date.timestamp()*1000)
 initial_no_vehicles = form.number_input("Insert start number of vehicles from today's fleet audit. \n Keep at 0 if you don't want to calculate this",value=0)
 
 ### checkbox to show one ways
-one_ways = form.checkbox('Show one ways table (could take up to 10sec)')
+one_ways = form.checkbox('Show one ways table (if this is checked, it could take up to 20seconds to load)')
 
 #sumbmit button
 submitted = form.form_submit_button("Submit")
