@@ -83,20 +83,22 @@ def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehi
     
     
 
-    if selected_service_area in ['LA', 'SF',  'SEA', 'LB',]:
-        start_date_local = start_date_utc + datetime.timedelta(hours=8)
-        end_date_local = end_date_utc + datetime.timedelta(hours=8)
-    elif selected_service_area == 'CHI':
-        start_date_local = start_date_utc + datetime.timedelta(hours=6)
-        end_date_local = end_date_utc + datetime.timedelta(hours=6)
-    elif selected_service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL']:
-        start_date_local = start_date_utc + datetime.timedelta(hours=5)
-        end_date_local = end_date_utc + datetime.timedelta(hours=5)
-    else:
-        raise
+    # if selected_service_area in ['LA', 'SF',  'SEA', 'LB',]:
+    #     start_date_local = start_date_utc + datetime.timedelta(hours=8)
+    #     end_date_local = end_date_utc + datetime.timedelta(hours=8)
+    # elif selected_service_area == 'CHI':
+    #     start_date_local = start_date_utc + datetime.timedelta(hours=6)
+    #     end_date_local = end_date_utc + datetime.timedelta(hours=6)
+    # elif selected_service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL']:
+    #     start_date_local = start_date_utc + datetime.timedelta(hours=5)
+    #     end_date_local = end_date_utc + datetime.timedelta(hours=5)
+    # else:
+    #     raise
 
-    start_date_unix = int(start_date_local.timestamp()*1000)
-    end_date_unix = int(end_date_local.timestamp()*1000) 
+    start_date_unix = int(start_date_utc.timestamp()*1000)
+    end_date_unix = int(end_date_utc.timestamp()*1000) 
+    # start_date_unix = int(start_date_local.timestamp()*1000)
+    # end_date_unix = int(end_date_local.timestamp()*1000) 
 
     params['start_date']= start_date_unix
     params['end_date']= end_date_unix
@@ -131,7 +133,7 @@ def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehi
     df = df.drop(df[(df['type'] == 'swap')].index)
     df = df.drop(df[(df['type'] == 'swap')].index)
 
-    return df, response_meta, start_date_local, end_date_local
+    return df, response_meta 
 
     
 
@@ -149,14 +151,14 @@ selected_vehicle_type = form.selectbox("Select vehicle type", list_vehicle_type)
 
 ### Start day selector
 start_date_day = form.date_input("Start day", datetime.datetime.now())
-start_date_time = datetime.datetime.min.time()
-start_date_utc = datetime.datetime.combine(start_date_day, start_date_time)
+start_date_time = form.time_input("Start Time", datetime.time(7, 00))
+start_date = datetime.datetime.combine(start_date_day, start_date_time)
 
 
 ### End day selector
 end_date_day = form.date_input("End day", datetime.datetime.now() + datetime.timedelta(days=1) )
-end_date_time = datetime.datetime.min.time()
-end_date_utc = datetime.datetime.combine(end_date_day, end_date_time)
+end_date_time = form.time_input("End Time", datetime.time(22, 00))
+end_date = datetime.datetime.combine(end_date_day, end_date_time)
 
 
 ### simple
@@ -178,7 +180,7 @@ if submitted:
     
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
-    data, meta, start_date, end_date = load_data(start_date_utc=start_date_utc, end_date_utc=end_date_utc, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type, one_ways=one_ways)
+    data, meta = load_data(start_date_utc=start_date, end_date_utc=end_date, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type, one_ways=one_ways)
     data = utc_to_local(data, selected_service_area)
     
     # output meta 
@@ -193,11 +195,11 @@ if submitted:
         data = post_filter_one_ways(data, selected_service_area)
 
     # create dataframe to plot 
-    df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='30min'), columns=['date'])
+    df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='15min'), columns=['date'])
     df_plot['no_bookings']=0
     
     for row in df_plot.index:
-        df_plot.at[row, 'no_bookings'] = ( (data['start_date'] < df_plot.at[row, 'date']) & (data['end_date'] >= df_plot.at[row, 'date']) ).sum()
+        df_plot.at[row, 'no_bookings'] = ( (data['start_date'] <= df_plot.at[row, 'date']) & (data['end_date'] > df_plot.at[row, 'date']) ).sum()
     
     df_plot['no_bookings'] = df_plot['no_bookings'].astype('int')
     df_plot = df_plot.set_index('date')
