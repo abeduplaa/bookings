@@ -61,11 +61,45 @@ def get_one_ways(data, selected_service_area):
     return deliveries, returns
 
 
-# @st.cache
-def load_data(start_date, end_date, selected_service_area, selected_vehicle_type, one_ways=False):
+
+def utc_to_local(data, service_area):
+    if service_area in ['LA', 'SF',  'SEA', 'LB',]:
+        data['start_date'] = data['start_date'] - pd.Timedelta(hours=8)
+        data['end_date'] = data['end_date'] - pd.Timedelta(hours=8)
+    elif service_area == 'CHI':
+        data['start_date'] = data['start_date'] - pd.Timedelta(hours=6)
+        data['end_date'] = data['end_date'] - pd.Timedelta(hours=6)
+    elif service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL']:
+        data['start_date'] = data['start_date'] - pd.Timedelta(hours=5)
+        data['end_date'] = data['end_date'] - pd.Timedelta(hours=5)
+    else:
+        raise 
     
-    params['start_date']=start_date
-    params['end_date']=end_date
+    return data
+
+
+# @st.cache
+def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehicle_type, one_ways=False):
+    
+    
+
+    if selected_service_area in ['LA', 'SF',  'SEA', 'LB',]:
+        start_date_local = start_date_utc + datetime.timedelta(hours=8)
+        end_date_local = end_date_utc + datetime.timedelta(hours=8)
+    elif selected_service_area == 'CHI':
+        start_date_local = start_date_utc + datetime.timedelta(hours=6)
+        end_date_local = end_date_utc + datetime.timedelta(hours=6)
+    elif selected_service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL']:
+        start_date_local = start_date_utc + datetime.timedelta(hours=5)
+        end_date_local = end_date_utc + datetime.timedelta(hours=5)
+    else:
+        raise
+
+    start_date_unix = int(start_date_local.timestamp()*1000)
+    end_date_unix = int(end_date_local.timestamp()*1000) 
+
+    params['start_date']= start_date_unix
+    params['end_date']= end_date_unix
     params['vehicle_classes']=selected_vehicle_type
 
     if one_ways:
@@ -97,7 +131,7 @@ def load_data(start_date, end_date, selected_service_area, selected_vehicle_type
     df = df.drop(df[(df['type'] == 'swap')].index)
     df = df.drop(df[(df['type'] == 'swap')].index)
 
-    return df, response_meta
+    return df, response_meta, start_date_local, end_date_local
 
     
 
@@ -116,14 +150,14 @@ selected_vehicle_type = form.selectbox("Select vehicle type", list_vehicle_type)
 ### Start day selector
 start_date_day = form.date_input("Start day", datetime.datetime.now())
 start_date_time = datetime.datetime.min.time()
-start_date = datetime.datetime.combine(start_date_day, start_date_time)
-start_date_unix = int(start_date.timestamp()*1000)
+start_date_utc = datetime.datetime.combine(start_date_day, start_date_time)
+
 
 ### End day selector
 end_date_day = form.date_input("End day", datetime.datetime.now() + datetime.timedelta(days=1) )
 end_date_time = datetime.datetime.min.time()
-end_date = datetime.datetime.combine(end_date_day, end_date_time)
-end_date_unix = int(end_date.timestamp()*1000)
+end_date_utc = datetime.datetime.combine(end_date_day, end_date_time)
+
 
 ### simple
 # vehicle_availability = form.checkbox('Calculate vehicle availability (simple method)')
@@ -133,8 +167,8 @@ end_date_unix = int(end_date.timestamp()*1000)
 initial_no_vehicles = form.number_input("Insert start number of vehicles from today's fleet audit. \n Keep at 0 if you don't want to calculate this",value=0)
 
 ### checkbox to show one ways
-one_ways = form.checkbox('Show one ways table (if this is checked, it could take up to 20seconds to load)')
-
+# one_ways = form.checkbox('Show one ways table (if this is checked, it could take up to 20seconds to load)')
+one_ways = False
 #sumbmit button
 submitted = form.form_submit_button("Submit")
 
@@ -144,8 +178,9 @@ if submitted:
     
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
-    data, meta = load_data(start_date=start_date_unix, end_date=end_date_unix, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type, one_ways=one_ways)
-
+    data, meta, start_date, end_date = load_data(start_date_utc=start_date_utc, end_date_utc=end_date_utc, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type, one_ways=one_ways)
+    data = utc_to_local(data, selected_service_area)
+    
     # output meta 
     print(meta)
 
@@ -158,7 +193,7 @@ if submitted:
         data = post_filter_one_ways(data, selected_service_area)
 
     # create dataframe to plot 
-    df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='H'), columns=['date'])
+    df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='30min'), columns=['date'])
     df_plot['no_bookings']=0
     
     for row in df_plot.index:
@@ -183,6 +218,11 @@ if submitted:
     st.subheader(text_subheader)
     st.line_chart(df_plot[cols])
 
+    # Show bookings in time period:
+    # cars_leaving, cars_incoming = get_one_ways(data, selected_service_area)
+    leaving_from_text = "Bookings during Time period in " + selected_service_area
+    st.write(data)    
+    
     # create 1-ways if checked
     if one_ways:
         # cars_leaving, cars_incoming = get_one_ways(data, selected_service_area)
