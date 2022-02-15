@@ -1,10 +1,8 @@
 import requests
 import pandas as pd
-import numpy as np
 
 import streamlit as st
-from streamlit import caching
-
+import time
 import datetime
 
 
@@ -34,33 +32,6 @@ DATE_COLUMN = 'start_date'
 def post_filter_one_ways(data, selected_service_area):
     return data.loc[data["type"]=="delivery"].loc[data["service_area"]==selected_service_area]
 
-def get_one_ways(data, selected_service_area):
-    
-    deliveries = data.loc[data['type']=='delivery'].set_index('trip_uuid')
-    returns = data.loc[data['type']=='return'].set_index('trip_uuid')
-    result = pd.concat([deliveries, returns], axis=1, join="inner")
-
-    cols=pd.Series(result.columns)
-
-
-
-    for dup in cols[cols.duplicated()].unique(): 
-        cols[cols[cols == dup].index.values.tolist()] = [dup + '_' + str(i) if i != 0 else dup for i in range(sum(cols == dup))]
-    result.columns = cols
-
-
-    result = result.loc[~(result['service_area'] == result['service_area_1'])]
-    
-    result = result.rename(columns={'service_area':'Delivery_SA', 'service_area_1':'Return_SA'})
-    
-
-    result = result[['Delivery_SA','Return_SA','start_date','end_date']]
-    deliveries = result[result['Delivery_SA']==selected_service_area]
-    returns = result[result['Return_SA']==selected_service_area]
-
-    return deliveries, returns
-
-
 
 def utc_to_local(data, service_area):
     if service_area in ['LA', 'SF',  'SEA', 'LB',]:
@@ -78,39 +49,18 @@ def utc_to_local(data, service_area):
     return data
 
 
-# @st.cache
-def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehicle_type, one_ways=False):
+def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehicle_type):
     
-    
-
-    # if selected_service_area in ['LA', 'SF',  'SEA', 'LB',]:
-    #     start_date_local = start_date_utc + datetime.timedelta(hours=8)
-    #     end_date_local = end_date_utc + datetime.timedelta(hours=8)
-    # elif selected_service_area == 'CHI':
-    #     start_date_local = start_date_utc + datetime.timedelta(hours=6)
-    #     end_date_local = end_date_utc + datetime.timedelta(hours=6)
-    # elif selected_service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL']:
-    #     start_date_local = start_date_utc + datetime.timedelta(hours=5)
-    #     end_date_local = end_date_utc + datetime.timedelta(hours=5)
-    # else:
-    #     raise
-
     start_date_unix = int(start_date_utc.timestamp()*1000)
     end_date_unix = int(end_date_utc.timestamp()*1000) 
-    # start_date_unix = int(start_date_local.timestamp()*1000)
-    # end_date_unix = int(end_date_local.timestamp()*1000) 
 
     params['start_date']= start_date_unix
     params['end_date']= end_date_unix
-    params['vehicle_classes']=selected_vehicle_type
+    params['service_area_name']=selected_service_area
+    params['leg_type']='delivery'
 
-    if one_ways:
-        params['service_area_name']="all"
-    else:
-        params['service_area_name']=selected_service_area
-        params['leg_type']='delivery'
-        
-
+    if selected_vehicle_type != "All":
+        params['vehicle_classes']=selected_vehicle_type
 
     response = requests.get("https://api.drivekyte.com/api/fleet/bookings/legs?",params=params, headers=headers)
     print(response.status_code)
@@ -146,7 +96,7 @@ list_service_area = ['LA', 'SF', 'BOS', 'BK', 'DC', 'NYC', 'SEA', 'MIA', 'CHI', 
 selected_service_area = form.selectbox("Select your service area", list_service_area)
 
 ### Vehicle type selector
-list_vehicle_type = ["Economy", "SUV", "Sedan"]
+list_vehicle_type = ["Economy", "SUV", "Sedan", "All"]
 selected_vehicle_type = form.selectbox("Select vehicle type", list_vehicle_type)
 
 ### Start day selector
@@ -161,16 +111,10 @@ end_date_time = form.time_input("End Time", datetime.time(22, 00))
 end_date = datetime.datetime.combine(end_date_day, end_date_time)
 
 
-### simple
-# vehicle_availability = form.checkbox('Calculate vehicle availability (simple method)')
-
 ### input number of vehicles 
 # if vehicle_availability:
 initial_no_vehicles = form.number_input("Insert start number of vehicles from today's fleet audit. \n Keep at 0 if you don't want to calculate this",value=0)
 
-### checkbox to show one ways
-# one_ways = form.checkbox('Show one ways table (if this is checked, it could take up to 20seconds to load)')
-one_ways = False
 #sumbmit button
 submitted = form.form_submit_button("Submit")
 
@@ -180,7 +124,7 @@ if submitted:
     
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
-    data, meta = load_data(start_date_utc=start_date, end_date_utc=end_date, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type, one_ways=one_ways)
+    data, meta = load_data(start_date_utc=start_date, end_date_utc=end_date, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type)
     data = utc_to_local(data, selected_service_area)
     
     # output meta 
@@ -190,10 +134,7 @@ if submitted:
     data_load_state.text('Loading data...done!')
     
 
-    if one_ways:
-        cars_leaving, cars_incoming = get_one_ways(data=data, selected_service_area=selected_service_area)
-        data = post_filter_one_ways(data, selected_service_area)
-
+    t0 = time.time()
     # create dataframe to plot 
     df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='15min'), columns=['date'])
     df_plot['no_bookings']=0
@@ -206,6 +147,7 @@ if submitted:
 
     df_plot['delta'] = df_plot['no_bookings'].apply(lambda x: df_plot['no_bookings'][start_date] - x)
     
+    print(time.time() - t0)
     if initial_no_vehicles != 0:
         car_col_name = "No of " + selected_vehicle_type
         df_plot[car_col_name] = df_plot['delta'].apply(lambda x: initial_no_vehicles + x)
@@ -221,18 +163,6 @@ if submitted:
     st.line_chart(df_plot[cols])
 
     # Show bookings in time period:
-    # cars_leaving, cars_incoming = get_one_ways(data, selected_service_area)
     leaving_from_text = "Bookings during Time period in " + selected_service_area
     st.write(data)    
-    
-    # create 1-ways if checked
-    if one_ways:
-        # cars_leaving, cars_incoming = get_one_ways(data, selected_service_area)
-        leaving_from_text = "Vehicles leaving from " + selected_service_area
-        st.subheader(leaving_from_text)
-        st.write(cars_leaving)
-
-        coming_to_text = "Vehicles coming to " + selected_service_area
-        st.subheader(coming_to_text)
-        st.write(cars_incoming)
 
