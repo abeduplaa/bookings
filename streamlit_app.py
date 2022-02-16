@@ -40,7 +40,7 @@ def utc_to_local(data, service_area):
     elif service_area == 'CHI':
         data['start_date'] = data['start_date'] - pd.Timedelta(hours=6)
         data['end_date'] = data['end_date'] - pd.Timedelta(hours=6)
-    elif service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL']:
+    elif service_area in ['BOS', 'BK', 'DC', 'NYC','MIA', 'PHL', 'JC']:
         data['start_date'] = data['start_date'] - pd.Timedelta(hours=5)
         data['end_date'] = data['end_date'] - pd.Timedelta(hours=5)
     else:
@@ -92,7 +92,7 @@ def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehi
 ### Service area selector
 form = st.form("my_form")
 # list_service_area = list(data['service_area'].unique())
-list_service_area = ['LA', 'SF', 'BOS', 'BK', 'DC', 'NYC', 'SEA', 'MIA', 'CHI', 'LB', 'PHL']
+list_service_area = ['LA', 'SF', 'BOS', 'BK', 'DC', 'NYC', 'SEA', 'MIA', 'CHI', 'LB', 'PHL', 'JC']
 selected_service_area = form.selectbox("Select your service area", list_service_area)
 
 ### Vehicle type selector
