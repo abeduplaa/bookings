@@ -29,9 +29,6 @@ params = {
 
 DATE_COLUMN = 'start_date'
 
-def post_filter_one_ways(data, selected_service_area):
-    return data.loc[data["type"]=="delivery"].loc[data["service_area"]==selected_service_area]
-
 
 def utc_to_local(data, service_area):
     if service_area in ['LA', 'SF',  'SEA', 'LB',]:
@@ -103,13 +100,14 @@ selected_vehicle_type = form.selectbox("Select vehicle type", list_vehicle_type)
 start_date_day = form.date_input("Start day", datetime.datetime.now())
 start_date_time = form.time_input("Start Time", datetime.time(7, 00))
 start_date = datetime.datetime.combine(start_date_day, start_date_time)
+start_date_search = datetime.datetime.combine(start_date_day, start_date_time) - pd.Timedelta(hours=8)
 
 
 ### End day selector
 end_date_day = form.date_input("End day", datetime.datetime.now() + datetime.timedelta(days=1) )
 end_date_time = form.time_input("End Time", datetime.time(22, 00))
 end_date = datetime.datetime.combine(end_date_day, end_date_time)
-
+end_date_search = datetime.datetime.combine(end_date_day, end_date_time) + pd.Timedelta(hours=8)
 
 ### input number of vehicles 
 # if vehicle_availability:
@@ -124,8 +122,9 @@ if submitted:
     
     # Create a text element and let the reader know the data is loading.
     data_load_state = st.text('Loading data...')
-    data, meta = load_data(start_date_utc=start_date, end_date_utc=end_date, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type)
+    data, meta = load_data(start_date_utc=start_date_search, end_date_utc=end_date_search, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type)
     data = utc_to_local(data, selected_service_area)
+
     
     # output meta 
     print(meta)
@@ -144,11 +143,12 @@ if submitted:
     
     df_plot['no_bookings'] = df_plot['no_bookings'].astype('int')
     df_plot = df_plot.set_index('date')
-
-    df_plot['delta'] = df_plot['no_bookings'].apply(lambda x: df_plot['no_bookings'][start_date] - x)
+    
+    data_out = data.loc[ (data['end_date'] > (start_date - pd.Timedelta(minutes=10)) ) & (data['start_date'] <= (end_date + pd.Timedelta(minutes=10)) )].reset_index()
     
     print(time.time() - t0)
     if initial_no_vehicles != 0:
+        df_plot['delta'] = df_plot['no_bookings'].apply(lambda x: df_plot['no_bookings'][start_date] - x)
         car_col_name = "No of " + selected_vehicle_type
         df_plot[car_col_name] = df_plot['delta'].apply(lambda x: initial_no_vehicles + x)
         cols = ['no_bookings', car_col_name]
@@ -164,5 +164,5 @@ if submitted:
 
     # Show bookings in time period:
     leaving_from_text = "Bookings during Time period in " + selected_service_area
-    st.write(data)    
+    st.write(data_out)    
 
