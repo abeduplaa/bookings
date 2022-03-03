@@ -178,7 +178,8 @@ if submitted:
     df_plot = pd.merge_asof(df_plot.reset_index(drop=False), df_supply, on="date", direction='nearest')
 
     df_plot["utilization"] = (df_plot['no_bookings']/df_plot["supply_count"]*100).astype('int')
-
+    
+    df_plot = df_plot.set_index('date')
 
     print(time.time() - t0)
     if initial_no_vehicles != 0:
