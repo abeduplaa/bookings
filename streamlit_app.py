@@ -1,10 +1,11 @@
+from heapq import merge
 import requests
 import pandas as pd
-
+from supply_count import *
 import streamlit as st
 import time
 import datetime
-
+import json
 
 headers = {
     'authority': "api.drivekyte.com",
@@ -90,6 +91,23 @@ def load_data(start_date_utc, end_date_utc, selected_service_area, selected_vehi
 form = st.form("my_form")
 # list_service_area = list(data['service_area'].unique())
 list_service_area = ['LA', 'SF', 'BOS', 'BK', 'DC', 'NYC', 'SEA', 'MIA', 'CHI', 'LB', 'PHL', 'JC']
+
+dict_service_area = {
+    'LA': ["49666e77-91a9-47ba-ab08-ab33861f5761", "15c30fc5-9133-4166-8f6e-5b8a2d94f4d6"],
+    'SF': "f18626dc-404b-4166-9c5b-dd1a450f6d1c",
+    'BOS': "103d323b-4b38-476d-ab30-eaf8c92eddfe",
+    'BK': "9c8dd958-1652-45d0-901b-2a7235db4d54",
+    'DC': "b984f1e0-d250-40ee-b1e2-a3fd7fabc844",
+    'NYC': ["42fdd319-ff38-4b52-ad60-18bee91dc55b", "d7b71559-b71d-4637-8031-140284eaec73"],
+    'SEA': "b04d109a-7626-42ce-af0a-acad0134c2bc",
+    'MIA': "d579cf3c-de1c-4c00-8bca-47add0578e92",
+    'CHI': "ec30a116-737e-4173-ac4d-a8d8b23fc796",
+    'LB': "628f1553-0f70-4b9a-80ff-1c2ead3c77a7",
+    'PHL': "f3065893-beeb-41fa-8ed1-79e4c725ba4a",
+    'JC': "31b7facf-063f-4816-a897-cd55aa994747",
+}
+
+
 selected_service_area = form.selectbox("Select your service area", list_service_area)
 
 ### Vehicle type selector
@@ -120,22 +138,33 @@ submitted = form.form_submit_button("Submit")
 ## once user clicks submit
 if submitted:
     
-    # Create a text element and let the reader know the data is loading.
-    data_load_state = st.text('Loading data...')
+    data_load_state = st.text('Loading booking data...')
     data, meta = load_data(start_date_utc=start_date_search, end_date_utc=end_date_search, selected_service_area=selected_service_area, selected_vehicle_type=selected_vehicle_type)
     data = utc_to_local(data, selected_service_area)
+    
+    data_load_state.text('Loading booking data...done!')
 
+    data_load_state.text('Loading supply data...')
+    start_date_unix_1 = int(start_date.timestamp()*1000)
+
+    supply_days = pd.date_range(start=start_date, end=end_date, normalize=True)
+    
+    # supply_count_l = []
+    # for day in supply_days:
+     #   day_unix = int(day.timestamp()*1000)
+     #   supply_count_l.append(request_supply_data(headers, dict_service_area[selected_service_area], day_unix, selected_vehicle_type))
+    
+    # request_supply_data(headers, dict_service_area[selected_service_area], day_unix, selected_vehicle_type)
+    # df_supply = pd.DataFrame(data={'date': supply_days, 'supply_count':supply_count_l })
+    df_supply = pd.DataFrame(data={'date': supply_days})
+    df_supply['supply_count']= request_supply_data(headers, dict_service_area[selected_service_area], start_date_unix_1, selected_vehicle_type)
     
     # output meta 
     print(meta)
 
-    # Notify the reader that the data was successfully loaded.
-    data_load_state.text('Loading data...done!')
-    
-
     t0 = time.time()
     # create dataframe to plot 
-    df_plot = pd.DataFrame(pd.date_range(start=start_date, end=end_date,freq='15min'), columns=['date'])
+    df_plot = pd.DataFrame(pd.date_range(start=start_date_search, end=end_date,freq='15min'), columns=['date'])
     df_plot['no_bookings']=0
     
     for row in df_plot.index:
@@ -143,9 +172,14 @@ if submitted:
     
     df_plot['no_bookings'] = df_plot['no_bookings'].astype('int')
     df_plot = df_plot.set_index('date')
-    
+
     data_out = data.loc[ (data['end_date'] > (start_date - pd.Timedelta(minutes=10)) ) & (data['start_date'] <= (end_date + pd.Timedelta(minutes=10)) )].reset_index()
     
+    df_plot = pd.merge_asof(df_plot.reset_index(drop=False), df_supply, on="date", direction='nearest')
+
+    df_plot["utilization"] = (df_plot['no_bookings']/df_plot["supply_count"]*100).astype('int')
+
+
     print(time.time() - t0)
     if initial_no_vehicles != 0:
         df_plot['delta'] = df_plot['no_bookings'].apply(lambda x: df_plot['no_bookings'][start_date] - x)
@@ -154,7 +188,7 @@ if submitted:
         cols = ['no_bookings', car_col_name]
         text_subheader = "Number of ongoing bookings and available " + selected_vehicle_type + ", per hour"
     else:
-        cols = ['no_bookings']
+        cols = ['no_bookings', 'supply_count', 'utilization']
         text_subheader = "Number of ongoing " + selected_vehicle_type + " bookings, per hour"
 
 
